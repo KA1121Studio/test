@@ -115,26 +115,24 @@ app.use('/proxy/:targetUrl*', async (req, res, next) => {
         { selector: '[background]', attr: 'background' },
       ];
 
-      urlAttrs.forEach(({ selector, attr }) => {
-        $(selector).each((i, el) => {
-          let value = $(el).attr(attr);
-          if (!value) return;
+     urlAttrs.forEach(({ selector, attr }) => {
+  $(selector).each((i, el) => {
+    let value = $(el).attr(attr);
+    if (!value) return;
 
-          // data:, blob:, javascript:, # で始まるものはスキップ
-          if (/^(data:|blob:|javascript:|#|about:)/i.test(value)) return;
+    // data:, blob:, javascript:, # で始まるものはスキップ
+    if (/^(data:|blob:|javascript:|#|about:)/i.test(value)) return;
 
-          try {
-            const resolved = new URL(value, targetBase).href;
-            // 同じオリジンならプロキシ経由に変換
-  
-              const proxiedUrl = `/proxy/${encodeURIComponent(resolved)}`;
-              $(el).attr(attr, proxiedUrl);
-            }
-          } catch (e) {
-            // 無効URLは無視
-          }
-        });
-      });
+    try {
+      const resolved = new URL(value, targetBase).href;
+      const proxiedUrl = `/proxy/${encodeURIComponent(resolved)}`;
+      $(el).attr(attr, proxiedUrl);
+    } catch (e) {
+      // 無効URLは無視
+    }
+  });
+});
+
 
       // srcset の特殊処理（カンマ区切り + 記述子対応）
       $('[srcset]').each((i, el) => {
