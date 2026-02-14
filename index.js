@@ -70,33 +70,50 @@ app.use(PROXY_PREFIX, (req, res, next) => {
       changeOrigin: true,
       logLevel: 'debug',  // Renderログで詳細が見えるように
 
-      pathRewrite: (incomingPath, req) => {
-        // incomingPath例: /proxy/https://www.youtube.com/watch?v=abc
-        // → /watch?v=abc にしたい
+// index.js の pathRewrite 部分だけを以下に置き換えてください（全体コードの最後の方）
 
-        // PROXY_PREFIX分を削る
-        let rewritten = incomingPath.substring(PROXY_PREFIX.length - 1); // 先頭/を残す
+pathRewrite: (incomingPath, req) => {
+  // incomingPath はマウントパス込みのフルパス例: /proxy/https://www.google.com/search?q=test
+  // または /proxy/?url=https://www.google.com/search?q=test の場合も考慮
 
-        // プロトコル+ホスト部分を削る（https://example.com の部分）
-        const protocolHostMatch = rewritten.match(/^\/?https?:\/\/[^/]+/);
-        if (protocolHostMatch) {
-          rewritten = rewritten.substring(protocolHostMatch[0].length);
-        }
+  let pathToRewrite = incomingPath;
 
-        // クエリ文字列を保持（req.url から取る方が安全な場合も）
-        const queryIndex = req.originalUrl.indexOf('?');
-        if (queryIndex !== -1) {
-          rewritten += req.originalUrl.substring(queryIndex);
-        }
+  // 1. PROXY_PREFIX (/proxy/) を確実に除去
+  if (pathToRewrite.startsWith(PROXY_PREFIX)) {
+    pathToRewrite = pathToRewrite.substring(PROXY_PREFIX.length);
+  }
 
-        // 空ならルートに
-        if (!rewritten || rewritten === '/') {
-          rewritten = target.pathname + (target.search || '');
-        }
+  // 2. クエリ形式 (?url=...) が混ざっている場合を優先処理
+  if (req.query.url) {
+    // フォーム経由の場合 → targetUrl は既に new URL でパース済み
+    // → ここでは pathRewrite は req.path に基づく相対パスを返すだけでOK
+    //    実際の target は createProxyMiddleware の target で決まる
+    const relativePath = req.path || '/';
+    console.log('[DEBUG] Form mode - relative path:', relativePath);
+    return relativePath;
+  }
 
-        console.log('[DEBUG] Rewritten path:', rewritten);
-        return rewritten;
-      },
+  // 3. パス形式 (/proxy/https://example.com/abc?def=1) の場合
+  //    → https://example.com/ の部分を削る
+  try {
+    // 先頭が http/https から始まる部分を探して除去
+    const protocolMatch = pathToRewrite.match(/^((https?:\/)?\/[^/?#]+)/i);
+    if (protocolMatch && protocolMatch[0]) {
+      const hostPartLength = protocolMatch[0].length;
+      pathToRewrite = pathToRewrite.substring(hostPartLength) || '/';
+    }
+  } catch (e) {
+    console.log('[DEBUG] Host strip failed:', e);
+  }
+
+  // 4. 空になったらルートに
+  if (!pathToRewrite || pathToRewrite === '') {
+    pathToRewrite = '/';
+  }
+
+  console.log('[DEBUG] Final rewritten path:', pathToRewrite);
+  return pathToRewrite;
+},
 
       selfHandleResponse: true,
 
