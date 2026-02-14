@@ -126,7 +126,7 @@ app.use('/proxy/:targetUrl*', async (req, res, next) => {
           try {
             const resolved = new URL(value, targetBase).href;
             // 同じオリジンならプロキシ経由に変換
-            if (resolved.startsWith(targetBase)) {
+  
               const proxiedUrl = `/proxy/${encodeURIComponent(resolved)}`;
               $(el).attr(attr, proxiedUrl);
             }
