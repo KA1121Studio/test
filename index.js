@@ -115,28 +115,33 @@ app.use('/proxy/:targetUrl*', async (req, res, next) => {
         { selector: '[background]', attr: 'background' },
       ];
 
-   urlAttrs.forEach(({ selector, attr }) => {
+urlAttrs.forEach(({ selector, attr }) => {
   $(selector).each((i, el) => {
     let value = $(el).attr(attr);
     if (!value) return;
 
-    // スキップ条件（既存）
+    // スキップ条件（拡張）
     if (/^(data:|blob:|javascript:|#|about:)/i.test(value)) return;
 
-    // ★新規追加：ページ内アンカー（#で始まる or #を含む）は書き換えない★
-    if (value.startsWith('#') || value.includes('#')) {
-      // そのままにする（相対アンカーや page.html#id もここで保護）
-      return;
-    }
+    // ページ内アンカー（#を含む）はスキップ（前回の修正を維持）
+    if (value.includes('#')) return;
 
     try {
+      // ★相対パスを確実に解決★
+      // valueが相対（例: "3hours.html", "./", "../other"）でもnew URLで絶対化
       const resolved = new URL(value, targetBase).href;
+
+      // 常にプロキシ化（前回の修正でifを外している前提）
       const proxiedUrl = `/proxy/${encodeURIComponent(resolved)}`;
+
       $(el).attr(attr, proxiedUrl);
-      
-      // デバッグ用ログ（任意）
-      // console.log(`Rewrote ${attr}: ${value} → ${proxiedUrl}`);
-    } catch (e) {}
+
+      // デバッグログ（任意：Renderのログで確認できる）
+      // console.log(`Rewrote ${selector} ${attr}: ${value} → ${proxiedUrl}`);
+
+    } catch (e) {
+      console.warn(`URL rewrite failed for: ${value}`, e);
+    }
   });
 });
 
