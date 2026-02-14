@@ -47,29 +47,32 @@ app.get('/', (req, res) => {
 
 // プロキシ処理（ここが核心）
 app.use(PROXY_PREFIX, (req, res, next) => {
-  let targetUrlStr;
+// app.use(PROXY_PREFIX, ...) 内の該当部分を以下のように修正
 
-  if (req.query.url) {
-    targetUrlStr = req.query.url.trim();
-  } else {
-    // パス形式の場合
-    let pathPart = req.path;
-    if (pathPart === '/' || pathPart === '') {
-      return res.redirect('/');
-    }
-    targetUrlStr = pathPart.startsWith('/') ? pathPart.slice(1) : pathPart;
-    if (!targetUrlStr.match(/^https?:\/\//i)) {
-      targetUrlStr = 'https://' + targetUrlStr;
-    }
-  }
+let targetUrlStr;
 
-  let target;
-  try {
-    target = new URL(targetUrlStr);
-  } catch (err) {
-    console.error('Invalid target URL:', targetUrlStr, err);
-    return res.status(400).send(`無効なURL: ${targetUrlStr}<br><a href="/">戻る</a>`);
+if (req.query.url) {
+  targetUrlStr = decodeURIComponent(req.query.url.trim());  // ← これを追加！重要
+} else {
+  // パス形式の場合（こちらは通常エンコードされていないのでデコード不要）
+  let pathPart = req.path;
+  if (pathPart === '/' || pathPart === '') {
+    return res.redirect('/');
   }
+  targetUrlStr = pathPart.startsWith('/') ? pathPart.slice(1) : pathPart;
+  if (!targetUrlStr.match(/^https?:\/\//i)) {
+    targetUrlStr = 'https://' + targetUrlStr;
+  }
+}
+
+// 以降は同じ
+let target;
+try {
+  target = new URL(targetUrlStr);
+} catch (err) {
+  console.error('Invalid target URL after decode:', targetUrlStr, err.message);
+  return res.status(400).send(`無効なURL: ${targetUrlStr}<br><a href="/">戻る</a>`);
+}
 
   const targetOrigin = target.origin;
   console.log('[DEBUG] Target origin set to:', targetOrigin);
