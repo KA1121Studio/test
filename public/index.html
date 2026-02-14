@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>test</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background:#0f0f1a; color:#e0e0ff; padding:40px; text-align:center; }
+    h1 { color:#88f; }
+    input[type="url"] { width: min(90vw, 600px); padding:14px; font-size:1.1rem; border-radius:8px; border:1px solid #444; background:#1a1a2e; color:white; }
+    button { padding:14px 32px; font-size:1.1rem; margin:20px; border:none; border-radius:8px; background:#4466ff; color:white; cursor:pointer; }
+    button:hover { background:#5577ff; }
+    .info { margin-top:40px; color:#aaa; font-size:0.9rem; }
+  </style>
+</head>
+<body>
+  <h1>なんでも開けるWebプロキシ</h1>
+  <p>URLを貼り付けて「開く」を押してください</p>
+  
+  <form id="proxyForm">
+    <input type="url" id="targetUrl" placeholder="https://example.com" required autofocus>
+    <br>
+    <button type="submit">開く</button>
+  </form>
+
+  <div class="info">
+    ※ YouTube, Twitter/X, Instagram, ニュースサイト、画像・動画ホストなども<br>
+    結構いけます（ただしログイン系・WebSocketは厳しいです）
+  </div>
+
+  <script>
+    document.getElementById("proxyForm").addEventListener("submit", e => {
+      e.preventDefault();
+      const url = document.getElementById("targetUrl").value.trim();
+      if (!url) return;
+      
+      // プロキシのエンドポイントにリダイレクト
+      window.location.href = `/proxy/${encodeURIComponent(url)}`;
+    });
+  </script>
+</body>
+</html>
