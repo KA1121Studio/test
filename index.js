@@ -115,24 +115,32 @@ app.use('/proxy/:targetUrl*', async (req, res, next) => {
         { selector: '[background]', attr: 'background' },
       ];
 
-     urlAttrs.forEach(({ selector, attr }) => {
+   urlAttrs.forEach(({ selector, attr }) => {
   $(selector).each((i, el) => {
     let value = $(el).attr(attr);
     if (!value) return;
 
-    // data:, blob:, javascript:, # で始まるものはスキップ
+    // スキップ条件はそのまま（これらはプロキシ化不要）
     if (/^(data:|blob:|javascript:|#|about:)/i.test(value)) return;
 
     try {
+      // 相対パス・絶対パス問わず、targetBaseを基準に絶対URLに解決
       const resolved = new URL(value, targetBase).href;
-      const proxiedUrl = `/proxy/${encodeURIComponent(resolved)}`;
-      $(el).attr(attr, proxiedUrl);
+
+      // ★ここをコメントアウトor削除して常にプロキシ化★
+      // if (resolved.startsWith(targetBase)) {    ← これを外す
+
+        const proxiedUrl = `/proxy/${encodeURIComponent(resolved)}`;
+        $(el).attr(attr, proxiedUrl);
+
+      // }   ← 対応する閉じ括弧も削除
+
     } catch (e) {
-      // 無効URLは無視
+      // 無効URLは無視（ログ出力しても良いかも）
+      console.warn(`Failed to proxy URL: ${value}`, e);
     }
   });
 });
-
 
       // srcset の特殊処理（カンマ区切り + 記述子対応）
       $('[srcset]').each((i, el) => {
