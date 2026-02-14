@@ -1,10 +1,10 @@
 import express from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import fetch from 'node-fetch';
-import * as cheerio from 'cheerio';  // ← 最新cheerio対応（* as）
+import * as cheerio from 'cheerio';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import https from 'https';  // ← 証明書エラー回避用
+import https from 'https';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -12,8 +12,8 @@ const __dirname = dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// 証明書エラー回避（Render環境で必須な場合が多い）
-process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";  // テスト用。本番では削除推奨
+// Render環境でのSSL証明書検証エラー回避（テスト・デバッグ用。本番では慎重に）
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
 
 app.use(express.static(join(__dirname, 'public')));
 
@@ -21,164 +21,175 @@ app.get('/', (req, res) => {
   res.sendFile(join(__dirname, 'public', 'index.html'));
 });
 
-// メインのプロキシエンドポイント
+// プロキシのメインエンドポイント: /proxy/<encoded-url>/*
 app.use('/proxy/:targetUrl*', async (req, res, next) => {
   try {
-    let targetUrl = decodeURIComponent(req.params.targetUrl);
-    if (!targetUrl.startsWith('http')) {
-      targetUrl = 'https://' + targetUrl;
+    let targetBase = decodeURIComponent(req.params.targetUrl);
+    if (!targetBase.startsWith('http')) {
+      targetBase = 'https://' + targetBase;
     }
 
-    const fullPath = req.params[0] || '';
+    const subPath = req.params[0] || '';
     const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
-    const target = targetUrl + fullPath + query;
+    const fullTarget = targetBase + (subPath.startsWith('/') ? '' : '/') + subPath + query;
 
-    // 静的ファイル（画像・CSS・JSなど）は直プロキシ（高速・Content-Type正しく通す）
-    const staticExtRegex = /\.(jpg|jpeg|png|gif|webp|svg|ico|css|js|woff2?|ttf|eot|otf|mp4|webm|ogg|mp3|wav|pdf)$/i;
-    if (staticExtRegex.test(fullPath) || req.headers.accept?.includes('image/') || req.headers.accept?.includes('font/')) {
+    // 静的リソース（画像・CSS・JS・フォントなど）の判定を強化
+    const isStatic = /\.(jpg|jpeg|png|gif|webp|svg|ico|css|js|woff2?|ttf|eot|otf|mp4|webm|ogg|mp3|wav|pdf|json|map)$/i.test(subPath)
+      || req.headers.accept?.includes('image/')
+      || req.headers.accept?.includes('font/')
+      || req.headers.accept?.includes('application/javascript')
+      || req.headers.accept?.includes('text/css');
+
+    if (isStatic) {
+      // pathRewriteを正確に適用（/proxy/https%3A%2F%2Fexample.com/abc.jpg → /abc.jpg）
+      const rewriteFrom = new RegExp(`^/proxy/${encodeURIComponent(targetBase)}/?`);
       return createProxyMiddleware({
-        target: targetUrl,
+        target: targetBase,
         changeOrigin: true,
-        pathRewrite: { [`^/proxy/${encodeURIComponent(targetUrl)}`]: '' },
+        pathRewrite: (path) => path.replace(rewriteFrom, ''),
         selfHandleResponse: false,
         onProxyReq(proxyReq) {
-          proxyReq.setHeader('User-Agent', req.headers['user-agent'] || 'Mozilla/5.0');
-          proxyReq.setHeader('Referer', targetUrl);
-          proxyReq.setHeader('Origin', targetUrl);
+          proxyReq.setHeader('User-Agent', req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
+          proxyReq.setHeader('Referer', targetBase);
+          proxyReq.setHeader('Origin', targetBase);
           proxyReq.setHeader('Accept', req.headers['accept'] || '*/*');
         },
         onProxyRes(proxyRes) {
-          // CORSヘッダーを強制的に付与（画像がブロックされないように）
+          // CORS回避＆セキュリティヘッダー緩和
           proxyRes.headers['access-control-allow-origin'] = '*';
-          proxyRes.headers['access-control-allow-methods'] = 'GET, HEAD';
+          proxyRes.headers['access-control-allow-methods'] = 'GET, HEAD, OPTIONS';
+          delete proxyRes.headers['content-security-policy'];
+          delete proxyRes.headers['x-frame-options'];
+          delete proxyRes.headers['x-content-type-options'];
         },
         onError(err, req, res) {
-          console.error('Static proxy error:', err);
-          res.status(502).send('Failed to load resource');
+          console.error('Static proxy error:', err.message);
+          res.status(502).send(`Failed to load static resource: ${err.message}`);
         }
       })(req, res, next);
     }
 
-    // HTML / その他テキスト系はfetch + 書き換え
+    // HTMLやその他のテキストコンテンツはfetch + URL書き換え
     const agent = new https.Agent({ rejectUnauthorized: false });
-    const response = await fetch(target, {
+    const response = await fetch(fullTarget, {
       headers: {
         'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': req.headers['accept'] || 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         'Accept-Language': req.headers['accept-language'] || 'ja,en;q=0.9',
-        'Referer': targetUrl,
+        'Referer': targetBase,
       },
       redirect: 'manual',
       agent,
     });
 
+    // リダイレクト対応
     if (response.redirected && response.headers.get('location')) {
       let location = response.headers.get('location');
       if (!location.startsWith('http')) {
-        location = new URL(location, targetUrl).href;
+        location = new URL(location, targetBase).href;
       }
       return res.redirect(302, `/proxy/${encodeURIComponent(location)}`);
     }
 
     let body = await response.text();
+    const contentType = response.headers.get('content-type')?.toLowerCase() || '';
 
-    const contentType = response.headers.get('content-type') || '';
+    // HTML系のみ書き換え処理
     if (contentType.includes('text/html') || contentType.includes('application/xhtml+xml')) {
-      const $ = cheerio.load(body, { decodeEntities: false, xmlMode: false });
+      const $ = cheerio.load(body, { decodeEntities: false });
 
-      // すべてのURL属性を処理（img, source, video, link, script, a, formなど）
+      // URLを含む属性の書き換えリスト（lazy loading対応強化）
       const urlAttrs = [
-        { sel: 'img, source, video, audio, iframe', attr: 'src' },
-        { sel: 'img', attr: 'srcset' },  // srcset対応
-        { sel: 'link, script', attr: 'href' },
-        { sel: 'link, script', attr: 'src' },
-        { sel: 'a, area', attr: 'href' },
-        { sel: 'form', attr: 'action' },
-        { sel: '[background]', attr: 'background' },
-        { sel: '[poster]', attr: 'poster' },
+        { selector: 'img, source, video, audio, iframe, embed', attr: 'src' },
+        { selector: 'img, source', attr: 'srcset' },
+        { selector: 'img', attr: 'data-src' },
+        { selector: 'img', attr: 'data-lazy-src' },
+        { selector: 'img', attr: 'data-original' },
+        { selector: '[data-bg], [data-background-image]', attr: 'data-bg' },
+        { selector: '[data-background]', attr: 'data-background' },
+        { selector: 'link[rel="stylesheet"], link[rel="icon"], link[rel="apple-touch-icon"]', attr: 'href' },
+        { selector: 'script', attr: 'src' },
+        { selector: 'a, area', attr: 'href' },
+        { selector: 'form', attr: 'action' },
+        { selector: '[poster]', attr: 'poster' },
+        { selector: '[background]', attr: 'background' },
       ];
 
-      urlAttrs.forEach(({ sel, attr }) => {
-        $(sel).each((i, el) => {
-          let val = $(el).attr(attr);
-          if (!val) return;
+      urlAttrs.forEach(({ selector, attr }) => {
+        $(selector).each((i, el) => {
+          let value = $(el).attr(attr);
+          if (!value) return;
 
-          // data: や javascript: はスキップ
-          if (/^(data:|javascript:|#|about:)/i.test(val)) return;
+          // data:, blob:, javascript:, # で始まるものはスキップ
+          if (/^(data:|blob:|javascript:|#|about:)/i.test(value)) return;
 
-          // すでにプロキシ経由ならスキップ
-          if (val.includes('/proxy/')) return;
-
-          // 相対 → 絶対に変換
           try {
-            const absolute = new URL(val, target).href;
-            const proxied = `/proxy/${encodeURIComponent(absolute)}`;
-            $(el).attr(attr, proxied);
+            const resolved = new URL(value, targetBase).href;
+            // 同じオリジンならプロキシ経由に変換
+            if (resolved.startsWith(targetBase)) {
+              const proxiedUrl = `/proxy/${encodeURIComponent(resolved)}`;
+              $(el).attr(attr, proxiedUrl);
+            }
           } catch (e) {
-            console.warn('Invalid URL:', val);
+            // 無効URLは無視
           }
         });
       });
 
-      // srcset の特殊対応（カンマ区切り）
-      $('img[srcset]').each((i, el) => {
-        let srcset = $(el).attr('srcset');
-        if (!srcset) return;
+      // srcset の特殊処理（カンマ区切り + 記述子対応）
+      $('[srcset]').each((i, el) => {
+        let srcset = $(el).attr('srcset') || '';
         const parts = srcset.split(',').map(part => {
-          const [urlPart, desc] = part.trim().split(/\s+/);
+          const trimmed = part.trim();
+          const [urlPart, ...desc] = trimmed.split(/\s+/);
           try {
-            const abs = new URL(urlPart, target).href;
-            return `/proxy/${encodeURIComponent(abs)}${desc ? ' ' + desc : ''}`;
+            const abs = new URL(urlPart, targetBase).href;
+            return `/proxy/${encodeURIComponent(abs)}${desc.length ? ' ' + desc.join(' ') : ''}`;
           } catch {
-            return part;
+            return trimmed;
           }
         });
         $(el).attr('srcset', parts.join(', '));
       });
 
-      // <style> タグ内の url(...) を書き換え
-      $('style').each((i, el) => {
-        let css = $(el).html() || '';
-        css = css.replace(/url\(['"]?([^'")]+)['"]?\)/gi, (match, urlPart) => {
-          if (/^(data:|#|\/)/i.test(urlPart)) return match; // data URI やアンカーはそのまま
+      // style属性 & <style>内の url(...)
+      const rewriteCssUrls = (css) => {
+        return css.replace(/url\(['"]?([^'")]+)['"]?\)/gi, (match, urlPart) => {
+          const trimmedUrl = urlPart.trim();
+          if (/^(data:|#|\/)/i.test(trimmedUrl)) return match;
           try {
-            const abs = new URL(urlPart, target).href;
+            const abs = new URL(trimmedUrl, targetBase).href;
             return `url(/proxy/${encodeURIComponent(abs)})`;
           } catch {
             return match;
           }
         });
-        $(el).html(css);
-      });
+      };
 
-      // インライン style 属性内の url(...)
       $('[style]').each((i, el) => {
         let style = $(el).attr('style') || '';
-        style = style.replace(/url\(['"]?([^'")]+)['"]?\)/gi, (match, urlPart) => {
-          try {
-            const abs = new URL(urlPart, target).href;
-            return `url(/proxy/${encodeURIComponent(abs)})`;
-          } catch {
-            return match;
-          }
-        });
-        $(el).attr('style', style);
+        $(el).attr('style', rewriteCssUrls(style));
       });
 
-      // base タグ削除
+      $('style').each((i, el) => {
+        let css = $(el).html() || '';
+        $(el).html(rewriteCssUrls(css));
+      });
+
+      // baseタグは削除（相対パスを壊す原因になることが多い）
       $('base').remove();
 
       body = $.html();
     }
 
-    // ヘッダー透過（Content-Typeなど重要）
+    // レスポンスヘッダー透過 + CORS対応
     const headers = {};
-    for (const [k, v] of response.headers.entries()) {
-      if (!['content-encoding', 'content-length', 'transfer-encoding'].includes(k.toLowerCase())) {
-        headers[k] = v;
+    response.headers.forEach((value, key) => {
+      const lowerKey = key.toLowerCase();
+      if (!['content-length', 'content-encoding', 'transfer-encoding'].includes(lowerKey)) {
+        headers[key] = value;
       }
-    }
-    // CORS回避用ヘッダー追加
+    });
     headers['access-control-allow-origin'] = '*';
 
     res.set(headers);
@@ -194,8 +205,11 @@ app.use('/proxy/:targetUrl*', async (req, res, next) => {
   }
 });
 
-app.use((req, res) => res.redirect('/'));
+// 404などはトップへ
+app.use((req, res) => {
+  res.redirect('/');
+});
 
 app.listen(PORT, () => {
-  console.log(`Proxy running on http://localhost:${PORT}`);
+  console.log(`Proxy server running on port ${PORT}`);
 });
