@@ -120,25 +120,23 @@ app.use('/proxy/:targetUrl*', async (req, res, next) => {
     let value = $(el).attr(attr);
     if (!value) return;
 
-    // スキップ条件はそのまま（これらはプロキシ化不要）
+    // スキップ条件（既存）
     if (/^(data:|blob:|javascript:|#|about:)/i.test(value)) return;
 
-    try {
-      // 相対パス・絶対パス問わず、targetBaseを基準に絶対URLに解決
-      const resolved = new URL(value, targetBase).href;
-
-      // ★ここをコメントアウトor削除して常にプロキシ化★
-      // if (resolved.startsWith(targetBase)) {    ← これを外す
-
-        const proxiedUrl = `/proxy/${encodeURIComponent(resolved)}`;
-        $(el).attr(attr, proxiedUrl);
-
-      // }   ← 対応する閉じ括弧も削除
-
-    } catch (e) {
-      // 無効URLは無視（ログ出力しても良いかも）
-      console.warn(`Failed to proxy URL: ${value}`, e);
+    // ★新規追加：ページ内アンカー（#で始まる or #を含む）は書き換えない★
+    if (value.startsWith('#') || value.includes('#')) {
+      // そのままにする（相対アンカーや page.html#id もここで保護）
+      return;
     }
+
+    try {
+      const resolved = new URL(value, targetBase).href;
+      const proxiedUrl = `/proxy/${encodeURIComponent(resolved)}`;
+      $(el).attr(attr, proxiedUrl);
+      
+      // デバッグ用ログ（任意）
+      // console.log(`Rewrote ${attr}: ${value} → ${proxiedUrl}`);
+    } catch (e) {}
   });
 });
 
