@@ -1,4 +1,3 @@
-
 import express from 'express';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import fetch from 'node-fetch';
@@ -410,6 +409,5 @@ app.use((req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(\`Proxy server running on port \${PORT}\`);
+  console.log(`Proxy server running on port ${PORT}`);
 });
-
