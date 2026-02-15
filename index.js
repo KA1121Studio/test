@@ -122,25 +122,32 @@ app.use('/proxy/:targetUrl*', async (req, res, next) => {
       ];
 
       // 静的属性の書き換え（fullTarget 基準）
-      staticAttrs.forEach(({ selector, attr }) => {
-        $(selector).each((i, el) => {
-          let value = $(el).attr(attr)?.trim();
-          if (!value) return;
-          // ページ内リンクは保護（先頭が # のみ）
-          if (value.startsWith('#')) return;
-          // 無視するスキーム
-          if (/^(data:|blob:|javascript:|about:)/i.test(value)) return;
+staticAttrs.forEach(({ selector, attr }) => {
+  $(selector).each((i, el) => {
+    let value = $(el).attr(attr)?.trim();
+    if (!value) return;
 
-          try {
-            const resolved = new URL(value, fullTarget).href;
-            const proxiedUrl = `/proxy/${encodeURIComponent(resolved)}`;
-            $(el).attr(attr, proxiedUrl);
-            console.log(`[STATIC] Rewrote <${selector}> ${attr}: "${value}" → "${proxiedUrl}"`);
-          } catch (e) {
-            console.warn(`[STATIC] Failed: "${value}"`);
-          }
-        });
-      });
+    // ページ内リンクは保護（先頭が # のみ）
+    if (value.startsWith('#')) return;
+
+    // 無視するスキーム
+    if (/^(data:|blob:|javascript:|about:)/i.test(value)) return;
+
+    try {
+      // 相対URLを fullTarget 基準で絶対URLに変換
+      const resolved = new URL(value, fullTarget).href;
+
+      // プロキシURLに書き換え
+      const proxiedUrl = `/proxy/${encodeURIComponent(resolved)}`;
+
+      $(el).attr(attr, proxiedUrl);
+      console.log(`[STATIC] Rewrote <${selector}> ${attr}: "${value}" → "${proxiedUrl}"`);
+    } catch (e) {
+      console.warn(`[STATIC] Failed: "${value}"`, e.message);
+    }
+  });
+});
+
 
       // リンク系（a, area, form）
       linkAttrs.forEach(({ selector, attr }) => {
