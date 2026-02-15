@@ -178,7 +178,8 @@ linkAttrs.forEach(({ selector, attr }) => {
           const trimmed = part.trim();
           const [urlPart, ...desc] = trimmed.split(/\s+/);
           try {
-            const abs = new URL(urlPart, targetBase).href;
+            const abs = new URL(urlPart, fullTarget).href;
+
             return `/proxy/${encodeURIComponent(abs)}${desc.length ? ' ' + desc.join(' ') : ''}`;
           } catch {
             return trimmed;
@@ -193,7 +194,8 @@ linkAttrs.forEach(({ selector, attr }) => {
           const trimmedUrl = urlPart.trim();
           if (/^(data:|#|\/)/i.test(trimmedUrl)) return match;
           try {
-            const abs = new URL(trimmedUrl, targetBase).href;
+            const abs = new URL(trimmedUrl, fullTarget).href;
+
             return `url(/proxy/${encodeURIComponent(abs)})`;
           } catch {
             return match;
@@ -213,6 +215,10 @@ linkAttrs.forEach(({ selector, attr }) => {
 
 $('base').remove();
 
+  // target="_blank" をサーバー側で削除
+$('a[target="_blank"]').removeAttr('target');
+
+
 // ★ ここに追加
 $('head').prepend(`
 <script>
@@ -231,38 +237,23 @@ $('head').prepend(`
     }
   }
 
-  // 🔥 すべてのリンククリックを横取り
-  document.addEventListener('click', function(e) {
-    const a = e.target.closest('a');
-    if (!a) return;
+  function fixLinks() {
+    document.querySelectorAll('a[href], area[href]').forEach(el => {
+      a.removeAttribute('target');
+      const href = a.getAttribute('href');
+      const proxied = toProxy(href);
+      if (proxied !== href) {
+        a.setAttribute('href', proxied);
+      }
+    });
+  }
 
-    const href = a.getAttribute('href');
-    if (!href) return;
+  fixLinks();
 
-    const proxied = toProxy(href);
-
-    if (proxied !== href) {
-      e.preventDefault();
-      window.location.href = proxied;
-    }
-  }, true);
-
-  // 🔥 window.open 完全フック
-  const originalOpen = window.open;
-  window.open = function(url, ...args) {
-    return originalOpen.call(this, toProxy(url), ...args);
-  };
-
-  // 🔥 location 書き換え完全対応
-  const originalAssign = window.location.assign;
-  window.location.assign = function(url) {
-    return originalAssign.call(this, toProxy(url));
-  };
-
-  const originalReplace = window.location.replace;
-  window.location.replace = function(url) {
-    return originalReplace.call(this, toProxy(url));
-  };
+  new MutationObserver(fixLinks).observe(document.body, {
+    childList: true,
+    subtree: true
+  });
 
 })();
 </script>
