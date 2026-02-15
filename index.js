@@ -34,11 +34,8 @@ app.use('/proxy/:targetUrl*', async (req, res, next) => {
     const fullTarget = targetBase + (subPath.startsWith('/') ? '' : '/') + subPath + query;
 
     // 静的リソース判定
-    const isStatic = /\.(jpg|jpeg|png|gif|webp|svg|ico|css|js|woff2?|ttf|eot|otf|mp4|webm|ogg|mp3|wav|pdf|json|map)$/i.test(subPath)
-      || req.headers.accept?.includes('image/')
-      || req.headers.accept?.includes('font/')
-      || req.headers.accept?.includes('application/javascript')
-      || req.headers.accept?.includes('text/css');
+    const isStatic = /\.(jpg|jpeg|png|gif|webp|svg|ico|css|js|woff2?|ttf|eot|otf|mp4|webm|ogg|mp3|wav|pdf|json|map)$/i.test(subPath);
+
 
     if (isStatic) {
       const rewriteFrom = new RegExp(`^/proxy/${encodeURIComponent(targetBase)}/?`);
