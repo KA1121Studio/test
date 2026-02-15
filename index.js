@@ -126,7 +126,8 @@ if (contentType.includes('text/html') || contentType.includes('application/xhtml
       let value = $(el).attr(attr)?.trim();
       if (!value) return;
       if (/^(data:|blob:|javascript:|#|about:)/i.test(value)) return;
-      if (value.includes('#')) return;
+      if (value.startsWith('#')) return;
+
 
       try {
         const resolved = new URL(value, targetBase).href;
@@ -145,7 +146,8 @@ if (contentType.includes('text/html') || contentType.includes('application/xhtml
       let value = $(el).attr(attr)?.trim();
       if (!value) return;
       if (/^(data:|blob:|javascript:|#|about:)/i.test(value)) return;
-      if (value.includes('#')) return;  // ページ内は保護
+      if (value.startsWith('#')) return;
+ // ページ内は保護
 
       try {
         const resolved = new URL(value, targetBase).href;
