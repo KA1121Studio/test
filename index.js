@@ -33,7 +33,7 @@ app.use('/proxy/:targetUrl*', async (req, res, next) => {
     const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
     const fullTarget = targetBase + (subPath.startsWith('/') ? '' : '/') + subPath + query;
 
-    // 静的リソース（画像・CSS・JS・フォントなど）の判定を強化
+    // 静的リソース判定
     const isStatic = /\.(jpg|jpeg|png|gif|webp|svg|ico|css|js|woff2?|ttf|eot|otf|mp4|webm|ogg|mp3|wav|pdf|json|map)$/i.test(subPath)
       || req.headers.accept?.includes('image/')
       || req.headers.accept?.includes('font/')
@@ -41,7 +41,6 @@ app.use('/proxy/:targetUrl*', async (req, res, next) => {
       || req.headers.accept?.includes('text/css');
 
     if (isStatic) {
-      // pathRewriteを正確に適用（/proxy/https%3A%2F%2Fexample.com/abc.jpg → /abc.jpg）
       const rewriteFrom = new RegExp(`^/proxy/${encodeURIComponent(targetBase)}/?`);
       return createProxyMiddleware({
         target: targetBase,
@@ -55,7 +54,6 @@ app.use('/proxy/:targetUrl*', async (req, res, next) => {
           proxyReq.setHeader('Accept', req.headers['accept'] || '*/*');
         },
         onProxyRes(proxyRes) {
-          // CORS回避＆セキュリティヘッダー緩和
           proxyRes.headers['access-control-allow-origin'] = '*';
           proxyRes.headers['access-control-allow-methods'] = 'GET, HEAD, OPTIONS';
           delete proxyRes.headers['content-security-policy'];
@@ -69,7 +67,7 @@ app.use('/proxy/:targetUrl*', async (req, res, next) => {
       })(req, res, next);
     }
 
-    // HTMLやその他のテキストコンテンツはfetch + URL書き換え
+    // HTML系はfetch + 書き換え
     const agent = new https.Agent({ rejectUnauthorized: false });
     const response = await fetch(fullTarget, {
       headers: {
@@ -94,11 +92,12 @@ app.use('/proxy/:targetUrl*', async (req, res, next) => {
     let body = await response.text();
     const contentType = response.headers.get('content-type')?.toLowerCase() || '';
 
-    // HTML系のみ書き換え処理
     if (contentType.includes('text/html') || contentType.includes('application/xhtml+xml')) {
-      const $ = cheerio.load(body, { decodeEntities: false });
+      const $ = cheerio.load(body, { 
+        decodeEntities: false,
+        xmlMode: false
+      });
 
-      // URLを含む属性の書き換えリスト（lazy loading対応強化）
       const urlAttrs = [
         { selector: 'img, source, video, audio, iframe, embed', attr: 'src' },
         { selector: 'img, source', attr: 'srcset' },
@@ -115,37 +114,32 @@ app.use('/proxy/:targetUrl*', async (req, res, next) => {
         { selector: '[background]', attr: 'background' },
       ];
 
-urlAttrs.forEach(({ selector, attr }) => {
-  $(selector).each((i, el) => {
-    let value = $(el).attr(attr);
-    if (!value) return;
+      urlAttrs.forEach(({ selector, attr }) => {
+        $(selector).each((i, el) => {
+          let value = $(el).attr(attr);
+          if (!value) return;
 
-    // スキップ条件（拡張）
-    if (/^(data:|blob:|javascript:|#|about:)/i.test(value)) return;
+          value = value.trim();  // ← 空白対策（重要）
 
-    // ページ内アンカー（#を含む）はスキップ（前回の修正を維持）
-    if (value.includes('#')) return;
+          if (/^(data:|blob:|javascript:|#|about:)/i.test(value)) return;
+          if (value.includes('#')) return;  // ページ内ジャンプ保護
 
-    try {
-      // ★相対パスを確実に解決★
-      // valueが相対（例: "3hours.html", "./", "../other"）でもnew URLで絶対化
-      const resolved = new URL(value, targetBase).href;
+          try {
+            const resolved = new URL(value, targetBase).href;
+            const proxiedUrl = `/proxy/${encodeURIComponent(resolved)}`;
 
-      // 常にプロキシ化（前回の修正でifを外している前提）
-      const proxiedUrl = `/proxy/${encodeURIComponent(resolved)}`;
+            $(el).attr(attr, proxiedUrl);
 
-      $(el).attr(attr, proxiedUrl);
+            // デバッグログ（特にaタグを詳しく）
+            console.log(`Rewrote <${selector}> ${attr}: original="${value}" → "${proxiedUrl}"`);
 
-      // デバッグログ（任意：Renderのログで確認できる）
-      // console.log(`Rewrote ${selector} ${attr}: ${value} → ${proxiedUrl}`);
+          } catch (e) {
+            console.warn(`Rewrite failed for "${value}" in <${selector}>:`, e.message);
+          }
+        });
+      });
 
-    } catch (e) {
-      console.warn(`URL rewrite failed for: ${value}`, e);
-    }
-  });
-});
-
-      // srcset の特殊処理（カンマ区切り + 記述子対応）
+      // srcset 処理（変更なし）
       $('[srcset]').each((i, el) => {
         let srcset = $(el).attr('srcset') || '';
         const parts = srcset.split(',').map(part => {
@@ -161,7 +155,7 @@ urlAttrs.forEach(({ selector, attr }) => {
         $(el).attr('srcset', parts.join(', '));
       });
 
-      // style属性 & <style>内の url(...)
+      // CSS url() 処理（変更なし）
       const rewriteCssUrls = (css) => {
         return css.replace(/url\(['"]?([^'")]+)['"]?\)/gi, (match, urlPart) => {
           const trimmedUrl = urlPart.trim();
@@ -185,13 +179,11 @@ urlAttrs.forEach(({ selector, attr }) => {
         $(el).html(rewriteCssUrls(css));
       });
 
-      // baseタグは削除（相対パスを壊す原因になることが多い）
       $('base').remove();
 
       body = $.html();
     }
 
-    // レスポンスヘッダー透過 + CORS対応
     const headers = {};
     response.headers.forEach((value, key) => {
       const lowerKey = key.toLowerCase();
@@ -214,9 +206,15 @@ urlAttrs.forEach(({ selector, attr }) => {
   }
 });
 
-// 404などはトップへ
+// 404ハンドラ（デバッグ用：トップに戻さず詳細表示）
 app.use((req, res) => {
-  res.redirect('/');
+  res.status(404).send(`
+    <h1>404 - パスが見つかりません（書き換え漏れの可能性大）</h1>
+    <p>アクセスされたパス: <strong>${req.originalUrl}</strong></p>
+    <p>これは相対リンク（例: /forecast/...）がプロキシURLに書き換わっていない可能性があります。</p>
+    <p>Renderログで "Rewrote" や "Rewrite failed" を確認してください。</p>
+    <a href="/">トップページに戻る</a>
+  `);
 });
 
 app.listen(PORT, () => {
