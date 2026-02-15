@@ -140,28 +140,29 @@ if (contentType.includes('text/html') || contentType.includes('application/xhtml
     });
   });
 
-  // リンク系の書き換え（ここを強化）
-  linkAttrs.forEach(({ selector, attr }) => {
-    $(selector).each((i, el) => {
-      let value = $(el).attr(attr)?.trim();
-      if (!value) return;
-      if (/^(data:|blob:|javascript:|#|about:)/i.test(value)) return;
-      if (value.startsWith('#')) return;
- // ページ内は保護
+linkAttrs.forEach(({ selector, attr }) => {
+  $(selector).each((i, el) => {
+    let value = $(el).attr(attr)?.trim();
+    if (!value) return;
 
-      try {
-        const resolved = new URL(value, targetBase).href;
-        const proxiedUrl = `/proxy/${encodeURIComponent(resolved)}`;
-        $(el).attr(attr, proxiedUrl);
+    // ページ内リンクだけはそのまま
+    if (value.startsWith('#')) return;
 
-        // aタグ専用詳細ログ
-        console.log(`[LINK] Rewrote <${selector}> ${attr}: original="${value}" → proxied="${proxiedUrl}" (base=${targetBase})`);
+    // 無視するスキーム
+    if (/^(data:|blob:|javascript:|about:)/i.test(value)) return;
 
-      } catch (e) {
-        console.warn(`[LINK] Rewrite failed for "${value}" in <${selector}>:`, e.message);
-      }
-    });
+    try {
+      // 今表示しているページ基準で解決する
+      const resolved = new URL(value, fullTarget).href;
+      const proxiedUrl = `/proxy/${encodeURIComponent(resolved)}`;
+      $(el).attr(attr, proxiedUrl);
+
+      console.log(`[LINK] ${value} → ${proxiedUrl}`);
+    } catch (e) {
+      console.warn(`[LINK] Failed: ${value}`);
+    }
   });
+});
 
   // srcset, style, base削除 は変更なし（そのままコピーしてOK）
 
