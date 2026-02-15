@@ -22,23 +22,19 @@ app.get('/', (req, res) => {
 });
 
 // メインプロキシ: /proxy/<encoded-url>/*
-app.use('/proxy/*', async (req, res, next) => {
+app.use('/proxy/:targetUrl*', async (req, res, next) => {
   try {
-    // /proxy/ の後ろ全部を取得
-    const fullEncoded = req.params[0];
-
-    if (!fullEncoded) {
-      return res.status(400).send('No target URL');
+    let targetBase = decodeURIComponent(req.params.targetUrl);
+    if (!targetBase.startsWith('http')) {
+      targetBase = 'https://' + targetBase;
     }
 
-    const fullTarget = decodeURIComponent(fullEncoded);
+    const subPath = req.params[0] || '';
+    const query = req.url.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
+    const fullTarget = targetBase + (subPath.startsWith('/') ? '' : '/') + subPath + query;
 
-    if (!fullTarget.startsWith('http')) {
-      return res.status(400).send('Invalid target URL');
-    }
-
-    // 静的リソース判定（fullTarget基準に変更）
-    const isStatic = /\.(jpg|jpeg|png|gif|webp|svg|ico|css|js|woff2?|ttf|eot|otf|mp4|webm|ogg|mp3|wav|pdf|json|map)$/i.test(fullTarget)
+    // 静的リソース判定
+    const isStatic = /\.(jpg|jpeg|png|gif|webp|svg|ico|css|js|woff2?|ttf|eot|otf|mp4|webm|ogg|mp3|wav|pdf|json|map)$/i.test(subPath)
       || req.headers.accept?.includes('image/')
       || req.headers.accept?.includes('font/')
       || req.headers.accept?.includes('application/javascript')
