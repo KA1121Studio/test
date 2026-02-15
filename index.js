@@ -238,6 +238,22 @@ linkAttrs.forEach(({ selector, attr }) => {
   }
 });
 
+app.use((req, res, next) => {
+  if (!req.originalUrl.startsWith('/proxy/') && req.originalUrl !== '/') {
+    const referer = req.headers.referer;
+    if (referer && referer.includes('/proxy/')) {
+      const baseMatch = referer.match(/\/proxy\/([^/]+)/);
+      if (baseMatch) {
+        const base = decodeURIComponent(baseMatch[1]);
+        const newUrl = new URL(req.originalUrl, base).href;
+        return res.redirect(`/proxy/${encodeURIComponent(newUrl)}`);
+      }
+    }
+  }
+  next();
+});
+
+
 // 404ハンドラ（デバッグ用：トップに戻さず詳細表示）
 app.use((req, res) => {
   res.status(404).send(`
