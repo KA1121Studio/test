@@ -217,36 +217,53 @@ $('base').remove();
 $('head').prepend(`
 <script>
 (function() {
-  const originalOpen = window.open;
-  window.open = function(url, ...args) {
-    if (url && !url.startsWith('/proxy/')) {
-      try {
-        const resolved = new URL(url, location.href).href;
-        url = '/proxy/' + encodeURIComponent(resolved);
-      } catch(e){}
-    }
-    return originalOpen.call(this, url, ...args);
-  };
 
-  const originalAssign = window.location.assign;
-  window.location.assign = function(url) {
-    if (url && !url.startsWith('/proxy/')) {
-      try {
-        const resolved = new URL(url, location.href).href;
-        url = '/proxy/' + encodeURIComponent(resolved);
-      } catch(e){}
+  function toProxy(url) {
+    if (!url) return url;
+    if (url.startsWith('/proxy/')) return url;
+    if (url.startsWith('#')) return url;
+    if (/^(data:|blob:|javascript:|about:)/i.test(url)) return url;
+    try {
+      const resolved = new URL(url, location.href).href;
+      return '/proxy/' + encodeURIComponent(resolved);
+    } catch(e) {
+      return url;
     }
-    return originalAssign.call(this, url);
-  };
+  }
 
-  // target="_blank" を防止
+  // 🔥 すべてのリンククリックを横取り
   document.addEventListener('click', function(e) {
     const a = e.target.closest('a');
     if (!a) return;
-    if (a.target === '_blank') {
-      a.removeAttribute('target');
+
+    const href = a.getAttribute('href');
+    if (!href) return;
+
+    const proxied = toProxy(href);
+
+    if (proxied !== href) {
+      e.preventDefault();
+      window.location.href = proxied;
     }
-  });
+  }, true);
+
+  // 🔥 window.open 完全フック
+  const originalOpen = window.open;
+  window.open = function(url, ...args) {
+    return originalOpen.call(this, toProxy(url), ...args);
+  };
+
+  // 🔥 location 書き換え完全対応
+  const originalAssign = window.location.assign;
+  window.location.assign = function(url) {
+    return originalAssign.call(this, toProxy(url));
+  };
+
+  const originalReplace = window.location.replace;
+  window.location.replace = function(url) {
+    return originalReplace.call(this, toProxy(url));
+  };
+
 })();
 </script>
 `);
