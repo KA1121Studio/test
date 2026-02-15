@@ -92,52 +92,80 @@ app.use('/proxy/:targetUrl*', async (req, res, next) => {
     let body = await response.text();
     const contentType = response.headers.get('content-type')?.toLowerCase() || '';
 
-    if (contentType.includes('text/html') || contentType.includes('application/xhtml+xml')) {
-      const $ = cheerio.load(body, { 
-        decodeEntities: false,
-        xmlMode: false
-      });
+    // HTML系のみ書き換え処理
+if (contentType.includes('text/html') || contentType.includes('application/xhtml+xml')) {
+  const $ = cheerio.load(body, { 
+    decodeEntities: false,
+    xmlMode: false
+  });
 
-      const urlAttrs = [
-        { selector: 'img, source, video, audio, iframe, embed', attr: 'src' },
-        { selector: 'img, source', attr: 'srcset' },
-        { selector: 'img', attr: 'data-src' },
-        { selector: 'img', attr: 'data-lazy-src' },
-        { selector: 'img', attr: 'data-original' },
-        { selector: '[data-bg], [data-background-image]', attr: 'data-bg' },
-        { selector: '[data-background]', attr: 'data-background' },
-        { selector: 'link[rel="stylesheet"], link[rel="icon"], link[rel="apple-touch-icon"]', attr: 'href' },
-        { selector: 'script', attr: 'src' },
-        { selector: 'a, area', attr: 'href' },
-        { selector: 'form', attr: 'action' },
-        { selector: '[poster]', attr: 'poster' },
-        { selector: '[background]', attr: 'background' },
-      ];
+  // 静的リソース属性（img, link[rel=stylesheet]など） → 今まで通り
+  const staticAttrs = [
+    { selector: 'img, source, video, audio, iframe, embed', attr: 'src' },
+    { selector: 'img, source', attr: 'srcset' },
+    { selector: 'img', attr: 'data-src' },
+    { selector: 'img', attr: 'data-lazy-src' },
+    { selector: 'img', attr: 'data-original' },
+    { selector: '[data-bg], [data-background-image]', attr: 'data-bg' },
+    { selector: '[data-background]', attr: 'data-background' },
+    { selector: 'link[rel="stylesheet"], link[rel="icon"], link[rel="apple-touch-icon"]', attr: 'href' },
+    { selector: 'script', attr: 'src' },
+    { selector: '[poster]', attr: 'poster' },
+    { selector: '[background]', attr: 'background' },
+  ];
 
-      urlAttrs.forEach(({ selector, attr }) => {
-        $(selector).each((i, el) => {
-          let value = $(el).attr(attr);
-          if (!value) return;
+  // ナビゲーション・フォーム系（a, form, area） → 特に強く書き換え
+  const linkAttrs = [
+    { selector: 'a, area', attr: 'href' },
+    { selector: 'form', attr: 'action' },
+  ];
 
-          value = value.trim();  // ← 空白対策（重要）
+  // 静的属性の書き換え（変更なし）
+  staticAttrs.forEach(({ selector, attr }) => {
+    $(selector).each((i, el) => {
+      let value = $(el).attr(attr)?.trim();
+      if (!value) return;
+      if (/^(data:|blob:|javascript:|#|about:)/i.test(value)) return;
+      if (value.includes('#')) return;
 
-          if (/^(data:|blob:|javascript:|#|about:)/i.test(value)) return;
-          if (value.includes('#')) return;  // ページ内ジャンプ保護
+      try {
+        const resolved = new URL(value, targetBase).href;
+        const proxiedUrl = `/proxy/${encodeURIComponent(resolved)}`;
+        $(el).attr(attr, proxiedUrl);
+        console.log(`[STATIC] Rewrote <${selector}> ${attr}: "${value}" → "${proxiedUrl}"`);
+      } catch (e) {
+        console.warn(`[STATIC] Failed: "${value}"`);
+      }
+    });
+  });
 
-          try {
-            const resolved = new URL(value, targetBase).href;
-            const proxiedUrl = `/proxy/${encodeURIComponent(resolved)}`;
+  // リンク系の書き換え（ここを強化）
+  linkAttrs.forEach(({ selector, attr }) => {
+    $(selector).each((i, el) => {
+      let value = $(el).attr(attr)?.trim();
+      if (!value) return;
+      if (/^(data:|blob:|javascript:|#|about:)/i.test(value)) return;
+      if (value.includes('#')) return;  // ページ内は保護
 
-            $(el).attr(attr, proxiedUrl);
+      try {
+        const resolved = new URL(value, targetBase).href;
+        const proxiedUrl = `/proxy/${encodeURIComponent(resolved)}`;
+        $(el).attr(attr, proxiedUrl);
 
-            // デバッグログ（特にaタグを詳しく）
-            console.log(`Rewrote <${selector}> ${attr}: original="${value}" → "${proxiedUrl}"`);
+        // aタグ専用詳細ログ
+        console.log(`[LINK] Rewrote <${selector}> ${attr}: original="${value}" → proxied="${proxiedUrl}" (base=${targetBase})`);
 
-          } catch (e) {
-            console.warn(`Rewrite failed for "${value}" in <${selector}>:`, e.message);
-          }
-        });
-      });
+      } catch (e) {
+        console.warn(`[LINK] Rewrite failed for "${value}" in <${selector}>:`, e.message);
+      }
+    });
+  });
+
+  // srcset, style, base削除 は変更なし（そのままコピーしてOK）
+
+  // ... (srcset処理, rewriteCssUrls, $('base').remove(); などは元のまま)
+
+
 
       // srcset 処理（変更なし）
       $('[srcset]').each((i, el) => {
