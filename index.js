@@ -257,17 +257,26 @@ app.use('/proxy/:targetUrl*', async (req, res, next) => {
   }, true);
 
   // クリック横取り（万が一のため、captureで早めに処理）
-  document.addEventListener('click', function(e) {
-    const a = e.target.closest && e.target.closest('a[href]');
-    if (!a) return;
-    const href = a.getAttribute('href') || '';
-    const prox = toProxyUrl(href);
-    if (prox !== href) {
-      e.preventDefault();
-      // 同じウィンドウで遷移（安全のため）
-      location.href = prox;
-    }
-  }, true);
+
+document.addEventListener('click', function(e) {
+  const a = e.target.closest && e.target.closest('a[href]');
+  if (!a) return;
+
+  const href = a.getAttribute('href');
+  if (!href) return;
+
+  if (href.startsWith('/proxy/')) return;
+  if (href.startsWith('#')) return;
+  if (/^(javascript:|data:|blob:|about:)/i.test(href)) return;
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  const abs = new URL(href, location.href).href;
+  location.href = '/proxy/' + encodeURIComponent(abs);
+
+}, true);
+
 
   // fetch を横取り
   const originalFetch = window.fetch;
