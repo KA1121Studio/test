@@ -211,9 +211,48 @@ linkAttrs.forEach(({ selector, attr }) => {
         $(el).html(rewriteCssUrls(css));
       });
 
-      $('base').remove();
+$('base').remove();
 
-      body = $.html();
+// ★ ここに追加
+$('head').prepend(`
+<script>
+(function() {
+  const originalOpen = window.open;
+  window.open = function(url, ...args) {
+    if (url && !url.startsWith('/proxy/')) {
+      try {
+        const resolved = new URL(url, location.href).href;
+        url = '/proxy/' + encodeURIComponent(resolved);
+      } catch(e){}
+    }
+    return originalOpen.call(this, url, ...args);
+  };
+
+  const originalAssign = window.location.assign;
+  window.location.assign = function(url) {
+    if (url && !url.startsWith('/proxy/')) {
+      try {
+        const resolved = new URL(url, location.href).href;
+        url = '/proxy/' + encodeURIComponent(resolved);
+      } catch(e){}
+    }
+    return originalAssign.call(this, url);
+  };
+
+  // target="_blank" を防止
+  document.addEventListener('click', function(e) {
+    const a = e.target.closest('a');
+    if (!a) return;
+    if (a.target === '_blank') {
+      a.removeAttribute('target');
+    }
+  });
+})();
+</script>
+`);
+
+body = $.html();
+
     }
 
     const headers = {};
