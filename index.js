@@ -122,25 +122,23 @@ app.use('/proxy/:targetUrl*', async (req, res, next) => {
       ];
 
       // 静的属性の書き換え（fullTarget 基準）
-      staticAttrs.forEach(({ selector, attr }) => {
-        $(selector).each((i, el) => {
-          let value = $(el).attr(attr)?.trim();
-          if (!value) return;
-          // ページ内リンクは保護（先頭が # のみ）
-          if (value.startsWith('#')) return;
-          // 無視するスキーム
-          if (/^(data:|blob:|javascript:|about:)/i.test(value)) return;
+　　staticAttrs.forEach(({ selector, attr }) => {
+  $(selector).each((i, el) => {
+    let value = $(el).attr(attr)?.trim();
+    if (!value) return;
+    if (/^(data:|blob:|javascript:|about:|#)/i.test(value)) return;
+    
+    try {
+      const resolved = new URL(value, fullTarget).href; // 絶対URL化
+      const proxiedUrl = `/proxy/${encodeURIComponent(resolved)}`;
+      $(el).attr(attr, proxiedUrl);
+    } catch (e) {
+      console.warn(`[STATIC] Failed: "${value}"`);
+    }
+  });
+});
 
-          try {
-            const resolved = new URL(value, fullTarget).href;
-            const proxiedUrl = `/proxy/${encodeURIComponent(resolved)}`;
-            $(el).attr(attr, proxiedUrl);
-            console.log(`[STATIC] Rewrote <${selector}> ${attr}: "${value}" → "${proxiedUrl}"`);
-          } catch (e) {
-            console.warn(`[STATIC] Failed: "${value}"`);
-          }
-        });
-      });
+
 
       // リンク系（a, area, form）
       linkAttrs.forEach(({ selector, attr }) => {
@@ -232,19 +230,25 @@ app.use('/proxy/:targetUrl*', async (req, res, next) => {
 
   // リンク・area・form の修正
   function fixLinksAndForms(root) {
-    (root || document).querySelectorAll('a[href], area[href], form[action]').forEach(el => {
-      if (el.tagName === 'FORM') {
-        const action = el.getAttribute('action') || '';
-        const prox = toProxyUrl(action || location.href);
-        el.setAttribute('action', prox);
-      } else {
-        el.removeAttribute('target');
-        const href = el.getAttribute('href') || '';
-        const prox = toProxyUrl(href);
-        if (prox !== href) el.setAttribute('href', prox);
-      }
-    });
-  }
+  (root || document).querySelectorAll(
+    'a[href], area[href], form[action], img[src], source[src]'
+  ).forEach(el => {
+    if (el.tagName === 'FORM') {
+      const action = el.getAttribute('action') || '';
+      const prox = toProxyUrl(action || location.href);
+      el.setAttribute('action', prox);
+    } else if (el.tagName === 'A' || el.tagName === 'AREA') {
+      el.removeAttribute('target');
+      const href = el.getAttribute('href') || '';
+      const prox = toProxyUrl(href);
+      if (prox !== href) el.setAttribute('href', prox);
+    } else if (el.tagName === 'IMG' || el.tagName === 'SOURCE') {
+      const src = el.getAttribute('src') || '';
+      const prox = toProxyUrl(src);
+      if (prox !== src) el.setAttribute('src', prox);
+    }
+  });
+}
 
   // フォーム submit を横取り（追加の保険）
   document.addEventListener('submit', function(e) {
