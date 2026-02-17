@@ -34,8 +34,8 @@ app.use('/proxy/:targetUrl*', async (req, res, next) => {
     const fullTarget = targetBase + (subPath.startsWith('/') ? '' : '/') + subPath + query;
 
     // 静的リソース判定
-    const isStatic = /\.(jpg|jpeg|png|gif|webp|svg|ico|css|js|woff2?|ttf|eot|otf|mp4|webm|ogg|mp3|wav|pdf|json|map)$/i.test(subPath);
-
+    const pathname = new URL(fullTarget).pathname;
+    const isStatic = /\.(jpg|jpeg|png|gif|webp|svg|ico|css|js|woff2?|ttf|eot|otf|mp4|webm|ogg|mp3|wav|pdf|json|map)$/i.test(pathname);
 
     if (isStatic) {
       const rewriteFrom = new RegExp(`^/proxy/${encodeURIComponent(targetBase)}/?`);
@@ -128,7 +128,7 @@ staticAttrs.forEach(({ selector, attr }) => {
 
     try {
       // targetBase を基準に絶対URL化する
-      const resolved = new URL(value, targetBase).href;
+      const resolved = new URL(value, fullTarget).href;
 
       // プロキシURLに書き換え
       const proxiedUrl = `/proxy/${encodeURIComponent(resolved)}`;
