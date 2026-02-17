@@ -37,33 +37,37 @@ app.use('/proxy/:targetUrl*', async (req, res, next) => {
     const pathname = new URL(fullTarget).pathname;
     const isStatic = /\.(jpg|jpeg|png|gif|webp|svg|ico|css|js|woff2?|ttf|eot|otf|mp4|webm|ogg|mp3|wav|pdf|json|map)$/i.test(pathname);
 
-    if (isStatic) {
-      const rewriteFrom = new RegExp(`^/proxy/${encodeURIComponent(targetBase)}/?`);
-      return createProxyMiddleware({
-        target: targetBase,
-        changeOrigin: true,
-        pathRewrite: (path) => path.replace(rewriteFrom, ''),
-        selfHandleResponse: false,
-        onProxyReq(proxyReq) {
-          proxyReq.setHeader('User-Agent', req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36');
-          proxyReq.setHeader('Referer', targetBase);
-          proxyReq.setHeader('Origin', targetBase);
-          proxyReq.setHeader('Accept', req.headers['accept'] || '*/*');
-        },
-        onProxyRes(proxyRes) {
-          proxyRes.headers['access-control-allow-origin'] = '*';
-          proxyRes.headers['access-control-allow-methods'] = 'GET, HEAD, OPTIONS';
-          // セキュリティヘッダを緩める（テスト用）
-          delete proxyRes.headers['content-security-policy'];
-          delete proxyRes.headers['x-frame-options'];
-          delete proxyRes.headers['x-content-type-options'];
-        },
-        onError(err, req, res) {
-          console.error('Static proxy error:', err.message);
-          res.status(502).send(`Failed to load static resource: ${err.message}`);
-        }
-      })(req, res, next);
+if (isStatic) {
+  const encodedFull = req.params.targetUrl + (req.params[0] || '');
+  const decodedFull = decodeURIComponent(encodedFull);
+
+  const urlObj = new URL(decodedFull);
+
+  return createProxyMiddleware({
+    target: urlObj.origin,
+    changeOrigin: true,
+    pathRewrite: () => urlObj.pathname + urlObj.search,
+    selfHandleResponse: false,
+    ws: true,
+
+    onProxyReq(proxyReq) {
+      proxyReq.setHeader('User-Agent', req.headers['user-agent'] || 'Mozilla/5.0');
+      proxyReq.setHeader('Referer', urlObj.origin);
+      proxyReq.setHeader('Origin', urlObj.origin);
+    },
+
+    onProxyRes(proxyRes) {
+      proxyRes.headers['access-control-allow-origin'] = '*';
+      delete proxyRes.headers['content-security-policy'];
+      delete proxyRes.headers['x-frame-options'];
+    },
+
+    onError(err, req, res) {
+      console.error('Static proxy error:', err.message);
+      res.status(502).send(`Static proxy failed: ${err.message}`);
     }
+  })(req, res, next);
+}
 
     // HTML系は fetch + 書き換え
     const agent = new https.Agent({ rejectUnauthorized: false });
