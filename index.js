@@ -43,9 +43,7 @@ app.use('/proxy/:targetUrl*', async (req, res, next) => {
   || pathname.includes("player");
     
 if (isStatic) {
-  const encodedFull = req.params.targetUrl + (req.params[0] || '');
-  const decodedFull = decodeURIComponent(encodedFull);
-
+  const decodedFull = decodeURIComponent(req.originalUrl.replace('/proxy/',''));
   const urlObj = new URL(decodedFull);
 
   return createProxyMiddleware({
