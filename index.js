@@ -465,12 +465,14 @@ app.use((req, res, next) => {
 });
 
 /* 404 ハンドラ */
-res.status(404).send(`
-  <h1>404 - パスが見つかりません</h1>
-  <p>アクセスされたパス: <strong>${req.originalUrl}</strong></p>
-  <p>書き換え漏れの可能性が高い。Render/ログで "Rewrote" を確認して。</p>
-  <a href="/">トップページに戻る</a>
-`);
+app.use((req, res) => {
+  res.status(404).send(`
+    <h1>404 - パスが見つかりません</h1>
+    <p>アクセスされたパス: <strong>${req.originalUrl}</strong></p>
+    <p>書き換え漏れの可能性が高い。Render/ログで "Rewrote" を確認して。</p>
+    <a href="/">トップページに戻る</a>
+  `);
+});
 
 app.listen(PORT, () => {
   console.log('Proxy server running on port', PORT);
