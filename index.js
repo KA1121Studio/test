@@ -35,8 +35,13 @@ app.use('/proxy/:targetUrl*', async (req, res, next) => {
 
     // 静的リソース判定
     const pathname = new URL(fullTarget).pathname;
-    const isStatic = /\.(jpg|jpeg|png|gif|webp|svg|ico|css|js|woff2?|ttf|eot|otf|mp4|webm|ogg|mp3|wav|pdf|json|map)$/i.test(pathname);
-
+    const isStatic =
+  /\.(jpg|jpeg|png|gif|webp|svg|ico|css|js|woff2?|ttf|eot|otf|mp4|webm|ogg|mp3|wav|pdf|json|map)$/i.test(pathname)
+  || pathname.includes("videoplayback")
+  || pathname.includes("youtubei")
+  || pathname.includes("api/stats")
+  || pathname.includes("player");
+    
 if (isStatic) {
   const encodedFull = req.params.targetUrl + (req.params[0] || '');
   const decodedFull = decodeURIComponent(encodedFull);
@@ -72,15 +77,18 @@ if (isStatic) {
     // HTML系は fetch + 書き換え
     const agent = new https.Agent({ rejectUnauthorized: false });
     const response = await fetch(fullTarget, {
-      headers: {
-        'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        'Accept': req.headers['accept'] || 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': req.headers['accept-language'] || 'ja,en;q=0.9',
-        'Referer': targetBase,
-      },
-      redirect: 'manual',
-      agent,
-    });
+  headers: {
+    'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0',
+    'Accept': '*/*',
+    'Accept-Language': 'ja,en;q=0.9',
+    'Referer': targetBase,
+    'Origin': targetBase,
+    'Cookie': req.headers.cookie || '',
+    'Accept-Encoding': 'gzip, deflate'
+  },
+  redirect: 'manual',
+  agent,
+});
 
     // リダイレクト対応
     if (response.redirected && response.headers.get('location')) {
@@ -93,7 +101,7 @@ if (isStatic) {
 
     // レスポンスをテキストで取得
     const contentType = response.headers.get('content-type')?.toLowerCase() || '';
-    let body = await response.text();
+    let body = await 'Accept-Encoding': 'gzip, deflate';
 
     if (contentType.includes('text/html') || contentType.includes('application/xhtml+xml')) {
       const $ = cheerio.load(body, {
@@ -208,7 +216,7 @@ staticAttrs.forEach(({ selector, attr }) => {
       });
 
       // base 削除（プロキシで扱うため）
-      $('base').remove();
+     　$('base').attr('href', `/proxy/${encodeURIComponent(targetBase)}/`)
 
       // server-side: target="_blank" を削除（確実に）
       $('a[target="_blank"]').removeAttr('target');
