@@ -1,40 +1,41 @@
 import express from "express";
 import { execSync } from "child_process";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ==============================
-// キャッシュ (メモリ内)
-// ==============================
-const videoCache = new Map();
-const CACHE_TTL = 1000 * 60 * 60 * 3; // 3時間
+// yt-dlp バイナリの絶対パス (環境変数で上書き可能)
+const YTDLP_PATH = process.env.YTDLP_PATH || path.join(__dirname, "yt-dlp");
 
 // ==============================
-// yt-dlp 実行ヘルパー
+// キャッシュ
 // ==============================
+const videoCache = new Map();
+const CACHE_TTL = 1000 * 60 * 60 * 3;
+
 /**
  * yt-dlp を実行してストリームURLを取得
- * @param {string} videoId YouTubeの動画ID (watch?v= の後ろ)
- * @param {string} format yt-dlp 用フォーマット指定
- * @param {string} [cookieFile] 任意のcookiesファイルパス
- * @returns {{ video: string, audio: string, source: string }}
  */
 function getVideoUrls(videoId, format, cookieFile = null) {
   const cookieArg = cookieFile ? `--cookies ${cookieFile}` : "";
   const cmd = [
-    "yt-dlp",
+    YTDLP_PATH,
     cookieArg,
     "--js-runtimes node",
     "--remote-components ejs:github",
-    "--sleep-requests 0.5",     // 高速化のため短め
+    "--sleep-requests 0.5",
     "--user-agent",
     '"Mozilla/5.0 (compatible; K-tube/2.0)"',
     "--get-url",
     "-f",
     `"${format}"`,
     `https://youtu.be/${videoId}`
-  ].join(" ");
+  ].filter(Boolean).join(" "); // cookieArg が空文字でも問題ないように filter
 
   try {
     const output = execSync(cmd, {
@@ -42,9 +43,8 @@ function getVideoUrls(videoId, format, cookieFile = null) {
       encoding: "utf-8",
     }).trim().split("\n");
 
-    // 音声分離フォーマットなら2行、統合なら1行
     const videoUrl = output[0] || "";
-    const audioUrl = output[1] || videoUrl; // 同じURLになる場合もある
+    const audioUrl = output[1] || videoUrl;
 
     if (!videoUrl) throw new Error("No URL extracted");
 
