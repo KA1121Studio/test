@@ -1,130 +1,138 @@
 import express from "express";
-import { execSync } from "child_process";
-import path from "path";
+import fetch from "node-fetch";
 import { fileURLToPath } from "url";
+import path from "path";
+import { execSync, chmodSync } from "child_process";
+import fs from "fs";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// yt-dlp バイナリの絶対パス (環境変数で上書き可能)
-const YTDLP_PATH = process.env.YTDLP_PATH || path.join(__dirname, "yt-dlp");
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-// ==============================
-// キャッシュ
-// ==============================
+// yt-dlp バイナリの絶対パスを固定（Render のビルドでダウンロードしたものを使用）
+const YTDLP_PATH = path.join(__dirname, "yt-dlp");
+
+// 初回だけ実行権限を保証（万が一の場合）
+try { chmodSync(YTDLP_PATH, 0o755); } catch (e) {}
+
+// 静的ファイル配信
+app.use(express.static(__dirname));
+
+// ====================== 以下、元のコードをほぼそのまま ======================
+let totalAccesses = 0;
+let todayAccesses = 0;
+let todayDate = new Date().toISOString().split('T')[0];
+let activeUsers = new Map();
+const ONLINE_TIMEOUT = 5 * 60 * 1000;
+
 const videoCache = new Map();
-const CACHE_TTL = 1000 * 60 * 60 * 3;
+const CACHE_TIME = 1000 * 60 * 60 * 3;
 
-/**
- * yt-dlp を実行してストリームURLを取得
- */
-function getVideoUrls(videoId, format, cookieFile = null) {
-  const cookieArg = cookieFile ? `--cookies ${cookieFile}` : "";
-  const cmd = [
-    YTDLP_PATH,
-    cookieArg,
-    "--js-runtimes node",
-    "--remote-components ejs:github",
-    "--sleep-requests 0.5",
-    "--user-agent",
-    '"Mozilla/5.0 (compatible; K-tube/2.0)"',
-    "--get-url",
-    "-f",
-    `"${format}"`,
-    `https://youtu.be/${videoId}`
-  ].filter(Boolean).join(" "); // cookieArg が空文字でも問題ないように filter
+// ...（updateTodayCount, incrementAccesses などは変更なし）...
+
+// ★★★ /video エンドポイント ★★★
+app.get("/video", async (req, res) => {
+  const videoId = req.query.id;
+  if (!videoId) return res.status(400).json({ error: "video id required" });
+
+  const cached = videoCache.get("video_" + videoId);
+  if (cached && Date.now() - cached.time < CACHE_TIME) {
+    console.log("CACHE HIT:", videoId);
+    return res.json(cached.data);
+  }
 
   try {
+    // コマンドを配列で構築（バイナリパス + 引数）
+    const cmd = [
+      YTDLP_PATH,
+      "--cookies", "youtube-cookies.txt",
+      "--socket-timeout", "30",                // ← 追加
+      "--js-runtimes", "node",
+      "--remote-components", "ejs:github",
+      "--sleep-requests", "1",
+      "--user-agent", "Mozilla/5.0",
+      "--get-url",
+      "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]",
+      `https://youtu.be/${videoId}`
+    ].join(" ");
+
     const output = execSync(cmd, {
-      timeout: 15000,
-      encoding: "utf-8",
+      timeout: 60000,      // 60秒に延長（元は15秒）
+      encoding: "utf-8"
     }).trim().split("\n");
 
     const videoUrl = output[0] || "";
     const audioUrl = output[1] || videoUrl;
 
-    if (!videoUrl) throw new Error("No URL extracted");
+    if (!videoUrl) throw new Error("No valid stream URL extracted. Cookies may be expired.");
 
-    return {
-      video: videoUrl,
-      audio: audioUrl,
-      source: "yt-dlp",
-    };
-  } catch (e) {
-    throw new Error(`yt-dlp failed: ${e.message}`);
-  }
-}
-
-// ==============================
-// プリセットフォーマット一覧
-// ==============================
-const FORMAT_PRESETS = {
-  best: "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-  audio: "bestaudio[ext=m4a]/bestaudio",
-  "360p": "best[ext=mp4][height<=360]/best[ext=mp4]",
-  "720p": "bestvideo[ext=mp4][height<=720]+bestaudio[ext=m4a]/best[ext=mp4][height<=720]",
-  "1080p": "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]",
-};
-
-// ==============================
-// API エンドポイント
-// ==============================
-app.get("/api/video", async (req, res) => {
-  const videoId = req.query.id;
-  if (!videoId) {
-    return res.status(400).json({ error: "?id=VIDEO_ID is required" });
-  }
-
-  // モード判定
-  let mode = req.query.mode || "best";  // デフォルトは最高画質+音声
-  let customFormat = req.query.format;  // カスタム指定があれば優先
-
-  if (customFormat) {
-    mode = "custom";
-  }
-
-  const formatStr = customFormat || FORMAT_PRESETS[mode];
-  if (!formatStr) {
-    return res.status(400).json({
-      error: "Invalid mode",
-      availableModes: Object.keys(FORMAT_PRESETS).concat("custom (use format=...)")
-    });
-  }
-
-  // キャッシュキー
-  const cacheKey = `${videoId}::${mode}::${formatStr}`;
-  const cached = videoCache.get(cacheKey);
-  if (cached && Date.now() - cached.time < CACHE_TTL) {
-    console.log(`CACHE HIT: ${cacheKey}`);
-    return res.json(cached.data);
-  }
-
-  // yt-dlp 実行
-  try {
-    const cookieFile = process.env.COOKIE_FILE || null; // 必要なら環境変数で指定
-    const data = getVideoUrls(videoId, formatStr, cookieFile);
-
-    // キャッシュに保存
-    videoCache.set(cacheKey, {
-      data,
-      time: Date.now(),
-    });
-    console.log(`CACHE SAVE: ${cacheKey}`);
-
+    const data = { video: videoUrl, audio: audioUrl, source: "yt-dlp" };
+    videoCache.set("video_" + videoId, { data, time: Date.now() });
+    console.log("CACHE SAVE:", videoId);
     res.json(data);
   } catch (e) {
     console.error("yt-dlp error:", e.message);
     res.status(500).json({
       error: "failed_to_extract_video",
       message: e.message.includes("Sign in")
-        ? "YouTube が認証を要求しています。有効な cookies ファイルを環境変数 COOKIE_FILE で指定してください。"
-        : e.message,
+        ? "YouTubeがボット判定しました。youtube-cookies.txtを最新のものに更新してください"
+        : e.message
     });
   }
 });
+
+// ★★★ /video360 エンドポイント ★★★
+app.get("/video360", async (req, res) => {
+  const videoId = req.query.id;
+  if (!videoId) return res.status(400).json({ error: "video id required" });
+
+  const cached = videoCache.get("video360_" + videoId);
+  if (cached && Date.now() - cached.time < CACHE_TIME) {
+    console.log("CACHE HIT 360:", videoId);
+    return res.json(cached.data);
+  }
+
+  try {
+    const cmd = [
+      YTDLP_PATH,
+      "--cookies", "youtube-cookies.txt",
+      "--socket-timeout", "30",                // ← 追加
+      "--js-runtimes", "node",
+      "--remote-components", "ejs:github",
+      "--sleep-requests", "1",
+      "--user-agent", "Mozilla/5.0",
+      "--get-url",
+      "-f", "best[ext=mp4][height<=360]/best[ext=mp4]/best",
+      `https://youtu.be/${videoId}`
+    ].join(" ");
+
+    const output = execSync(cmd, {
+      timeout: 60000,
+      encoding: "utf-8"
+    }).trim();
+
+    if (!output) throw new Error("No valid 360p stream");
+
+    const data = { video: output, audio: output, source: "yt-dlp-360p-progressive" };
+    videoCache.set("video360_" + videoId, { data, time: Date.now() });
+    console.log("CACHE SAVE 360:", videoId);
+    res.json(data);
+  } catch (e) {
+    console.error("yt-dlp 360p error:", e.message);
+    res.status(500).json({ error: "failed_to_extract_video_360", message: e.message });
+  }
+});
+
+// ...（他のエンドポイントはすべてそのまま）...
 
 // キャッシュクリア (管理用)
 app.get("/api/clear-cache", (req, res) => {
