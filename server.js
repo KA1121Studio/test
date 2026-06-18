@@ -22,7 +22,7 @@ if (fs.existsSync(YTDLP)) {
 // キャッシュ
 // ----------------------------------------------
 const videoCache = new Map();
-const CACHE_TIME = 1000 * 60 * 60 * 3; // 3時間（必要に応じて24時間に延ばしてもOK）
+const CACHE_TIME = 1000 * 60 * 60 * 3; // 3時間
 
 // ----------------------------------------------
 // ヘルスチェック
@@ -32,7 +32,7 @@ app.get("/", (req, res) => {
 });
 
 // ----------------------------------------------
-// 【モード1】最高画質（映像MP4 + 音声M4A）軽量版
+// 【モード1】最高画質（映像MP4 + 音声M4A）
 // ----------------------------------------------
 app.get("/video", async (req, res) => {
   const videoId = req.query.id;
@@ -46,11 +46,12 @@ app.get("/video", async (req, res) => {
   }
 
   try {
-    // 軽量オプション追加
-    const cmd = `${YTDLP} --no-playlist --no-check-certificate --no-cache-dir --socket-timeout 10 --sleep-requests 0.5 --cookies youtube-cookies.txt --js-runtimes node --remote-components ejs:github --user-agent "Mozilla/5.0" --get-url -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]" https://youtu.be/${videoId}`;
+    // --- 元のコマンドをそのまま（yt-dlp → ./yt-dlp に変更） ---
+    const cmd = `${YTDLP} --cookies youtube-cookies.txt --js-runtimes node --remote-components ejs:github --sleep-requests 1 --user-agent "Mozilla/5.0" --get-url -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]" https://youtu.be/${videoId}`;
 
     const output = execSync(cmd, {
-      // timeout: 60000,  ← 必要に応じて有効化
+      // タイムアウトが必要なら追加（デフォルトは制限なし）
+      // timeout: 60000,  ← 動画が重い場合に有効にしてください
     }).toString().trim().split("\n");
 
     const videoUrl = output[0] || "";
@@ -82,7 +83,7 @@ app.get("/video", async (req, res) => {
 });
 
 // ----------------------------------------------
-// 【モード2】360p プログレッシブ（映像+音声一体化）軽量版
+// 【モード2】360p プログレッシブ（映像+音声一体化）
 // ----------------------------------------------
 app.get("/video360", async (req, res) => {
   const videoId = req.query.id;
@@ -95,8 +96,8 @@ app.get("/video360", async (req, res) => {
   }
 
   try {
-    // 軽量オプション追加（同じく）
-    const cmd = `${YTDLP} --no-playlist --no-check-certificate --no-cache-dir --socket-timeout 10 --sleep-requests 0.5 --cookies youtube-cookies.txt --js-runtimes node --remote-components ejs:github --user-agent "Mozilla/5.0" --get-url -f "best[ext=mp4][height<=360]/best[ext=mp4]/best" https://youtu.be/${videoId}`;
+    // --- 元のコマンドをそのまま ---
+    const cmd = `${YTDLP} --cookies youtube-cookies.txt --js-runtimes node --remote-components ejs:github --sleep-requests 1 --user-agent "Mozilla/5.0" --get-url -f "best[ext=mp4][height<=360]/best[ext=mp4]/best" https://youtu.be/${videoId}`;
 
     const output = execSync(cmd).toString().trim();
 
